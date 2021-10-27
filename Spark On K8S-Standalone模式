@@ -1,0 +1,128 @@
+# -----------------------------------------------Spark On K8S-Standalone模式
+# 几种模式
+# Standalone：
+    在 K8S 启动一个长期运行的集群，所有 Job 都通过 spark-submit 向集群提交
+# Kubernetes Native：
+    通过 spark-submit 向 K8S 的 API Server 提交，申请到资源后，启动 Pod 做为 Driver 和 Executor 执行 Job，
+    参考 http://spark.apache.org/docs/2.4.6/running-on-kubernetes.html
+    https://apache-spark-on-k8s.github.io/userdocs/running-on-kubernetes.html
+# Spark Operator：
+    安装 Spark Operator，然后定义 spark-app.yaml，再执行 kubectl apply -f spark-app.yaml
+    申明式 API 和调用方式，K8S典型应用方式
+参考 https://github.com/GoogleCloudPlatform/spark-on-k8s-operator
+# 下载带 Hadoop 的版本，有 Hadoop jar 包可用
+https://archive.apache.org/dist/spark/
+
+# Spark 2.3 提供 bin/docker-image-tool.sh，用于 build image
+vim ./bin/docker-image-tool.sh 
+# docker build 命令加上 --network=host，让容器使用宿主机网络
+sudo ./bin/docker-image-tool.sh -t spark_2.4_hdp2.7_image build
+
+# 定义 manifest
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-manager
+spec:
+  type: ClusterIP
+  ports:
+  - name: rpc
+    port: 7077
+  - name: ui
+    port: 8080
+  selector:
+    app: spark
+    component: sparkmanager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-manager-rest
+spec:
+  type: NodePort
+  ports:
+  - name: rest
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: spark
+    component: sparkmanager
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark
+      component: sparkmanager
+  template:
+    metadata:
+      labels:
+        app: spark
+        component: sparkmanager
+    spec:
+      containers:
+      - name: sparkmanager
+        image: spark:my_spark_2.4_hadoop_2.7
+        workingDir: /opt/spark
+        command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh && while true;do echo hello;sleep 6000;done"]
+        ports:
+        - containerPort: 7077
+          name: rpc
+        - containerPort: 8080
+          name: ui
+        livenessProbe:
+          tcpSocket:
+            port: 7077
+          initialDelaySeconds: 30
+          periodSeconds: 60
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: spark
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: spark
+        component: worker
+    spec:
+      containers:
+      - name: sparkworker
+        image: spark:my_spark_2.4_hadoop_2.7
+        workingDir: /opt/spark
+        command: ["/bin/bash", "-c", "/opt/spark/sbin/start-slave.sh spark://spark-manager:7077 && while true;do echo hello;sleep 6000;done"]   
+kubectl create -f standalone.yaml
+
+
+# 查看 pod service/(rest)service 信息
+sudo kubectl get pod,svc spark-manager-rest
+
+# 登陆Spark Manager Web UI(10.106.200.126:8080 )，查看 worker 和 Job 信息
+可启动 spark history server
+
+
+# 登陆其中一台 worker
+sudo kubectl exec -t -i spark-worker-6f55fddc87-w5zgm /bin/bash
+# 提交 Job
+bin/spark-submit \
+        --master spark://spark-manager:7077 \
+        --num-executors 2 \
+        --name spark-test \
+        /opt/spark/examples/src/main/python/wordcount.py \
+        # 第二个 wordcount.py 作为参数
+        /opt/spark/examples/src/main/python/wordcount.py
+ # standalone 模式下的 Python ，不支持 cluster 模式（即 driver 必然运行在执行 spark-submit 的容器上）
+ 
+Driver 的 log ，随 spark-submit 命令打出来
+Executor 的 log ，分布在每个 Worker 的 work 目录下
