@@ -28,7 +28,6 @@ tar -zxvf protobuf-2.5.0.tar.gz
 cd protobuf-2.5.0
 ./configure && make && make check && make install
 # 重建/etc/ld.so.cache文件
-ldconfig
 
 vim /etc/profile：
 export JAVA_HOME=/opt/jdk1.8
@@ -41,7 +40,6 @@ export PATH=$JAVA_HOME/bin:$PROTOBUF_HOME:$MAVEN_HOME/bin:$CMAKE_HOME/bin:$ANT_H
 
 cd hadoop-3.3.0-src：
 mvn clean package -DskipTests -Pdist,native -Dtar
-# 约30分钟
 
 # -------------------------------Hadoop-3.1.3
 # CentOS7.4
